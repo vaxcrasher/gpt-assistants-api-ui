@@ -2,6 +2,7 @@ import os
 import base64
 import re
 import json
+import pickle
 
 import streamlit as st
 import openai
@@ -13,6 +14,15 @@ import streamlit_authenticator as stauth
 
 load_dotenv()
 
+def save_threads(threads):
+    with open("threads.pkl", "wb") as f:
+        pickle.dump(threads, f)
+
+def load_threads():
+    if os.path.exists("threads.pkl"):
+        with open("threads.pkl", "rb") as f:
+            return pickle.load(f)
+    return {}
 
 def str_to_bool(str_input):
     if not isinstance(str_input, str):
@@ -32,6 +42,11 @@ enabled_file_upload_message = os.environ.get(
     "ENABLED_FILE_UPLOAD_MESSAGE", "Upload a file"
 )
 
+if "threads" not in st.session_state:
+    st.session_state.threads = load_threads()
+
+if "current_thread" not in st.session_state:
+    st.session_state.current_thread = None
 
 # Load authentication configuration
 if authentication_required:
@@ -256,7 +271,6 @@ def login():
     elif st.session_state["authentication_status"] is None:
         st.warning("Please enter your username and password")
 
-
 def main():
     if (
         authentication_required
@@ -271,46 +285,61 @@ def main():
             authenticator.logout(location="sidebar")
 
     st.title(assistant_title)
-    user_msg = st.chat_input(
-        "Message", on_submit=disable_form, disabled=st.session_state.in_progress
-    )
 
-    if enabled_file_upload_message:
-        uploaded_file = st.sidebar.file_uploader(
-            enabled_file_upload_message,
-            type=[
-                "txt",
-                "pdf",
-                "png",
-                "jpg",
-                "jpeg",
-                "csv",
-                "json",
-                "geojson",
-                "xlsx",
-                "xls",
-            ],
-            disabled=st.session_state.in_progress,
-        )
-    else:
-        uploaded_file = None
+    user_id = st.text_input("User ID")
+    if user_id:
+        if user_id not in st.session_state.threads:
+            st.session_state.threads[user_id] = []
+        selected_thread = st.selectbox("Select Thread", ["New Thread"] + st.session_state.threads[user_id])
 
-    if user_msg:
-        render_chat()
-        with st.chat_message("user"):
-            st.markdown(user_msg, True)
-        st.session_state.chat_log.append({"name": "user", "msg": user_msg})
+        if selected_thread == "New Thread":
+            user_msg = st.chat_input(
+                "Message", on_submit=disable_form, disabled=st.session_state.in_progress
+            )
 
-        file = None
-        if uploaded_file is not None:
-            file = handle_uploaded_file(uploaded_file)
-        run_stream(user_msg, file)
-        st.session_state.in_progress = False
-        st.session_state.tool_call = None
-        st.rerun()
+            if enabled_file_upload_message:
+                uploaded_file = st.sidebar.file_uploader(
+                    enabled_file_upload_message,
+                    type=[
+                        "txt",
+                        "docx",
+                        "pdf",
+                        "png",
+                        "jpg",
+                        "jpeg",
+                        "csv",
+                        "json",
+                        "geojson",
+                        "xlsx",
+                        "xls",
+                    ],
+                    disabled=st.session_state.in_progress,
+                )
+            else:
+                uploaded_file = None
+
+            if user_msg:
+                render_chat()
+                with st.chat_message("user"):
+                    st.markdown(user_msg, True)
+                st.session_state.chat_log.append({"name": "user", "msg": user_msg})
+
+                file = None
+                if uploaded_file is not None:
+                    file = handle_uploaded_file(uploaded_file)
+                thread = create_thread(user_msg, file)
+                st.session_state.current_thread = thread.id
+                st.session_state.threads[user_id].append(thread.id)
+                save_threads(st.session_state.threads)
+                run_stream(user_msg, file)
+                st.session_state.in_progress = False
+                st.session_state.tool_call = None
+                st.rerun()
+        else:
+            st.session_state.current_thread = selected_thread
+            render_chat()
 
     render_chat()
-
 
 if __name__ == "__main__":
     main()
