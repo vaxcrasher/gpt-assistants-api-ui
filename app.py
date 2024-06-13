@@ -284,13 +284,12 @@ def main():
         else:
             authenticator.logout(location="sidebar")
 
-    st.title(assistant_title)
+    username = st.session_state.get("username")
 
-    user_id = st.text_input("User ID")
-    if user_id:
-        if user_id not in st.session_state.threads:
-            st.session_state.threads[user_id] = []
-        selected_thread = st.selectbox("Select Thread", ["New Thread"] + st.session_state.threads[user_id])
+    if username:
+        if username not in st.session_state.threads:
+            st.session_state.threads[username] = []
+        selected_thread = st.selectbox("Select Thread", ["New Thread"] + st.session_state.threads[username])
 
         if selected_thread == "New Thread":
             user_msg = st.chat_input(
@@ -302,7 +301,6 @@ def main():
                     enabled_file_upload_message,
                     type=[
                         "txt",
-                        "docx",
                         "pdf",
                         "png",
                         "jpg",
@@ -313,7 +311,7 @@ def main():
                         "xlsx",
                         "xls",
                     ],
-                    disabled=st.session_state.in_progress,
+                    disabled=st.session_state.in_progress
                 )
             else:
                 uploaded_file = None
@@ -329,7 +327,7 @@ def main():
                     file = handle_uploaded_file(uploaded_file)
                 thread = create_thread(user_msg, file)
                 st.session_state.current_thread = thread.id
-                st.session_state.threads[user_id].append(thread.id)
+                st.session_state.threads[username].append(thread.id)
                 save_threads(st.session_state.threads)
                 run_stream(user_msg, file)
                 st.session_state.in_progress = False
