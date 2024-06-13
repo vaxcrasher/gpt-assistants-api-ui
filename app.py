@@ -24,6 +24,13 @@ def load_threads():
             return pickle.load(f)
     return {}
 
+def get_thread_name(threads, username, thread_id):
+    return threads[username].get(thread_id, thread_id)
+
+def set_thread_name(threads, username, thread_id, name):
+    threads[username][thread_id] = name
+    save_threads(threads)
+
 def str_to_bool(str_input):
     if not isinstance(str_input, str):
         return False
@@ -47,6 +54,9 @@ if "threads" not in st.session_state:
 
 if "current_thread" not in st.session_state:
     st.session_state.current_thread = None
+
+if "current_thread_name" not in st.session_state:
+    st.session_state.current_thread_name = ""
 
 # Load authentication configuration
 if authentication_required:
@@ -288,10 +298,18 @@ def main():
 
     if username:
         if username not in st.session_state.threads:
-            st.session_state.threads[username] = []
-        selected_thread = st.selectbox("Select Thread", ["New Thread"] + st.session_state.threads[username])
+            st.session_state.threads[username] = {}
+
+        st.header("Conversations")
+        thread_options = ["New Thread"] + [
+            get_thread_name(st.session_state.threads, username, thread_id)
+            for thread_id in st.session_state.threads[username].keys()
+        ]
+        selected_thread = st.selectbox("Select Thread", thread_options)
 
         if selected_thread == "New Thread":
+            thread_name = st.text_input("Enter a name for the new conversation")
+
             user_msg = st.chat_input(
                 "Message", on_submit=disable_form, disabled=st.session_state.in_progress
             )
@@ -327,14 +345,24 @@ def main():
                     file = handle_uploaded_file(uploaded_file)
                 thread = create_thread(user_msg, file)
                 st.session_state.current_thread = thread.id
-                st.session_state.threads[username].append(thread.id)
-                save_threads(st.session_state.threads)
+                set_thread_name(st.session_state.threads, username, thread.id, thread_name)
                 run_stream(user_msg, file)
                 st.session_state.in_progress = False
                 st.session_state.tool_call = None
                 st.rerun()
         else:
-            st.session_state.current_thread = selected_thread
+            thread_id = list(st.session_state.threads[username].keys())[
+                thread_options.index(selected_thread) - 1
+            ]
+            st.session_state.current_thread = thread_id
+            st.session_state.current_thread_name = selected_thread
+
+            new_name = st.text_input("Rename this conversation", value=selected_thread)
+            if st.button("Rename"):
+                set_thread_name(st.session_state.threads, username, thread_id, new_name)
+                st.session_state.current_thread_name = new_name
+                st.rerun()
+
             render_chat()
 
     render_chat()
