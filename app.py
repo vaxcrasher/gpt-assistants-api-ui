@@ -1,8 +1,5 @@
-import os
-import base64
-import re
-import json
 import pickle
+import os
 
 import streamlit as st
 import openai
@@ -13,6 +10,8 @@ from dotenv import load_dotenv
 import streamlit_authenticator as stauth
 
 load_dotenv()
+
+# Utility Functions
 
 def save_threads(threads):
     with open("threads.pkl", "wb") as f:
@@ -36,7 +35,6 @@ def str_to_bool(str_input):
         return False
     return str_input.lower() == "true"
 
-
 # Load environment variables
 azure_openai_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
 azure_openai_key = os.environ.get("AZURE_OPENAI_KEY")
@@ -49,25 +47,26 @@ enabled_file_upload_message = os.environ.get(
     "ENABLED_FILE_UPLOAD_MESSAGE", "Upload a file"
 )
 
-# Initialize session state
-def save_threads(threads):
-    with open("threads.pkl", "wb") as f:
-        pickle.dump(threads, f)
+# Initialize session state variables if not already initialized
+if "threads" not in st.session_state:
+    st.session_state.threads = load_threads()
 
-def load_threads():
-    if os.path.exists("threads.pkl"):
-        with open("threads.pkl", "rb") as f:
-            return pickle.load(f)
-    return {}
+if "current_thread" not in st.session_state:
+    st.session_state.current_thread = None
 
-def get_thread_name(threads, username, thread_id):
-    return threads[username].get(thread_id, thread_id)
+if "current_thread_name" not in st.session_state:
+    st.session_state.current_thread_name = ""
 
-def set_thread_name(threads, username, thread_id, name):
-    threads[username][thread_id] = name
-    save_threads(threads)
+if "chat_log" not in st.session_state:
+    st.session_state.chat_log = []
 
-# Load authentication configuration
+if "tool_call" not in st.session_state:
+    st.session_state.tool_calls = []
+
+if "in_progress" not in st.session_state:
+    st.session_state.in_progress = False
+
+# Handle Authentication
 if authentication_required:
     if "credentials" in st.secrets:
         authenticator = stauth.Authenticate(
@@ -79,6 +78,7 @@ if authentication_required:
     else:
         authenticator = None  # No authentication should be performed
 
+# Initialize OpenAI Client
 client = None
 if azure_openai_endpoint and azure_openai_key:
     client = openai.AzureOpenAI(
@@ -89,7 +89,7 @@ if azure_openai_endpoint and azure_openai_key:
 else:
     client = openai.OpenAI(api_key=openai_api_key)
 
-
+# Define EventHandler and Helper Functions
 class EventHandler(AssistantEventHandler):
     @override
     def on_event(self, event):
@@ -193,7 +193,6 @@ class EventHandler(AssistantEventHandler):
             ) as stream:
                 stream.until_done()
 
-
 def create_thread(content, file):
     messages = [
         {
@@ -206,7 +205,6 @@ def create_thread(content, file):
     thread = client.beta.threads.create()
     return thread
 
-
 def create_message(thread, content, file):
     attachments = []
     if file is not None:
@@ -217,14 +215,12 @@ def create_message(thread, content, file):
         thread_id=thread.id, role="user", content=content, attachments=attachments
     )
 
-
 def create_file_link(file_name, file_id):
     content = client.files.content(file_id)
     content_type = content.response.headers["content-type"]
     b64 = base64.b64encode(content.text.encode(content.encoding)).decode()
     link_tag = f'<a href="data:{content_type};base64,{b64}" download="{file_name}">Download Link</a>'
     return link_tag
-
 
 def format_annotation(text):
     citations = []
@@ -246,7 +242,6 @@ def format_annotation(text):
     text_value += "\n\n" + "\n".join(citations)
     return text_value
 
-
 def run_stream(user_input, file):
     if "thread" not in st.session_state:
         st.session_state.thread = create_thread(user_input, file)
@@ -258,31 +253,17 @@ def run_stream(user_input, file):
     ) as stream:
         stream.until_done()
 
-
 def handle_uploaded_file(uploaded_file):
     file = client.files.create(file=uploaded_file, purpose="assistants")
     return file
-
 
 def render_chat():
     for chat in st.session_state.chat_log:
         with st.chat_message(chat["name"]):
             st.markdown(chat["msg"], True)
 
-
-if "tool_call" not in st.session_state:
-    st.session_state.tool_calls = []
-
-if "chat_log" not in st.session_state:
-    st.session_state.chat_log = []
-
-if "in_progress" not in st.session_state:
-    st.session_state.in_progress = False
-
-
 def disable_form():
     st.session_state.in_progress = True
-
 
 def login():
     if st.session_state["authentication_status"] is False:
@@ -320,47 +301,15 @@ def main():
             thread_name = st.text_input("Enter a name for the new conversation")
             if st.button("Start Conversation"):
                 if thread_name:
-                    user_msg = st.chat_input(
-                        "Message", on_submit=disable_form, disabled=st.session_state.in_progress
-                    )
-
-                    if enabled_file_upload_message:
-                        uploaded_file = st.sidebar.file_uploader(
-                            enabled_file_upload_message,
-                            type=[
-                                "txt",
-                                "pdf",
-                                "png",
-                                "jpg",
-                                "jpeg",
-                                "csv",
-                                "json",
-                                "geojson",
-                                "xlsx",
-                                "xls",
-                            ],
-                            disabled=st.session_state.in_progress
-                        )
-                    else:
-                        uploaded_file = None
-
-                    if user_msg:
-                        st.session_state.chat_log = []  # Clear chat log for new conversation
-                        render_chat()
-                        with st.chat_message("user"):
-                            st.markdown(user_msg, True)
-                        st.session_state.chat_log.append({"name": "user", "msg": user_msg})
-
-                        file = None
-                        if uploaded_file is not None:
-                            file = handle_uploaded_file(uploaded_file)
-                        thread = create_thread(user_msg, file)
-                        st.session_state.current_thread = thread.id
-                        set_thread_name(st.session_state.threads, username, thread.id, thread_name)
-                        run_stream(user_msg, file)
-                        st.session_state.in_progress = False
-                        st.session_state.tool_call = None
-                        st.rerun()
+                    st.session_state.chat_log = []  # Clear chat log for new conversation
+                    st.session_state.in_progress = False
+                    st.session_state.tool_call = None
+                    file = None
+                    thread = create_thread("", file)
+                    st.session_state.current_thread = thread.id
+                    set_thread_name(st.session_state.threads, username, thread.id, thread_name)
+                    st.session_state.current_thread_name = thread_name
+                    st.rerun()
         else:
             thread_id = list(st.session_state.threads[username].keys())[
                 thread_options.index(selected_thread) - 1
@@ -377,7 +326,6 @@ def main():
             render_chat()
 
     render_chat()
-
 
 if __name__ == "__main__":
     main()
