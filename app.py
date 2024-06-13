@@ -49,14 +49,23 @@ enabled_file_upload_message = os.environ.get(
     "ENABLED_FILE_UPLOAD_MESSAGE", "Upload a file"
 )
 
-if "threads" not in st.session_state:
-    st.session_state.threads = load_threads()
+# Initialize session state
+def save_threads(threads):
+    with open("threads.pkl", "wb") as f:
+        pickle.dump(threads, f)
 
-if "current_thread" not in st.session_state:
-    st.session_state.current_thread = None
+def load_threads():
+    if os.path.exists("threads.pkl"):
+        with open("threads.pkl", "rb") as f:
+            return pickle.load(f)
+    return {}
 
-if "current_thread_name" not in st.session_state:
-    st.session_state.current_thread_name = ""
+def get_thread_name(threads, username, thread_id):
+    return threads[username].get(thread_id, thread_id)
+
+def set_thread_name(threads, username, thread_id, name):
+    threads[username][thread_id] = name
+    save_threads(threads)
 
 # Load authentication configuration
 if authentication_required:
@@ -301,55 +310,57 @@ def main():
             st.session_state.threads[username] = {}
 
         st.header("Conversations")
-        thread_options = ["New Thread"] + [
+        thread_options = ["New conversation"] + [
             get_thread_name(st.session_state.threads, username, thread_id)
             for thread_id in st.session_state.threads[username].keys()
         ]
         selected_thread = st.selectbox("Select Thread", thread_options)
 
-        if selected_thread == "New Thread":
+        if selected_thread == "New conversation":
             thread_name = st.text_input("Enter a name for the new conversation")
+            if st.button("Start Conversation"):
+                if thread_name:
+                    user_msg = st.chat_input(
+                        "Message", on_submit=disable_form, disabled=st.session_state.in_progress
+                    )
 
-            user_msg = st.chat_input(
-                "Message", on_submit=disable_form, disabled=st.session_state.in_progress
-            )
+                    if enabled_file_upload_message:
+                        uploaded_file = st.sidebar.file_uploader(
+                            enabled_file_upload_message,
+                            type=[
+                                "txt",
+                                "pdf",
+                                "png",
+                                "jpg",
+                                "jpeg",
+                                "csv",
+                                "json",
+                                "geojson",
+                                "xlsx",
+                                "xls",
+                            ],
+                            disabled=st.session_state.in_progress
+                        )
+                    else:
+                        uploaded_file = None
 
-            if enabled_file_upload_message:
-                uploaded_file = st.sidebar.file_uploader(
-                    enabled_file_upload_message,
-                    type=[
-                        "txt",
-                        "pdf",
-                        "png",
-                        "jpg",
-                        "jpeg",
-                        "csv",
-                        "json",
-                        "geojson",
-                        "xlsx",
-                        "xls",
-                    ],
-                    disabled=st.session_state.in_progress
-                )
-            else:
-                uploaded_file = None
+                    if user_msg:
+                        st.session_state.chat_log = []  # Clear chat log for new conversation
+                        render_chat()
+                        with st.chat_message("user"):
+                            st.markdown(user_msg, True)
+                        st.session_state.chat_log.append({"name": "user", "msg": user_msg})
 
-            if user_msg:
-                render_chat()
-                with st.chat_message("user"):
-                    st.markdown(user_msg, True)
-                st.session_state.chat_log.append({"name": "user", "msg": user_msg})
-
-                file = None
-                if uploaded_file is not None:
-                    file = handle_uploaded_file(uploaded_file)
-                thread = create_thread(user_msg, file)
-                st.session_state.current_thread = thread.id
-                set_thread_name(st.session_state.threads, username, thread.id, thread_name)
-                run_stream(user_msg, file)
-                st.session_state.in_progress = False
-                st.session_state.tool_call = None
-                st.rerun()
+                        file = None
+                        if uploaded_file is not None:
+                            file = handle_uploaded_file(uploaded_file)
+                        thread = create_thread(user_msg, file)
+                        st.session_state.current_thread = thread.id
+                        set_thread_name(st.session_state.threads, username, thread.id, thread_name)
+                        run_stream(user_msg, file)
+                        st.session_state.in_progress = False
+                        st.session_state.tool_call = None
+                        st.rerun()
         else:
             thread_id = list(st.session_state.threads[username].keys())[
                 thread_options.index(selected_thread) - 1
@@ -366,6 +377,7 @@ def main():
             render_chat()
 
     render_chat()
+
 
 if __name__ == "__main__":
     main()
